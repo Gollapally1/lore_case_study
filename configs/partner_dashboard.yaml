@@ -1,0 +1,101 @@
+# Data Contract: partner_dashboard
+# Derived data product. Reads from silver.engagement_events, writes to a serving store.
+# This is what employer partners actually see in their dashboard.
+
+contract:
+  name: partner_dashboard
+  version: 1.0.0
+  owner_squad: partner-experience
+  owner_email: partners-eng@lore.co
+  description: >
+    Per-partner, per-day rollups powering the employer-facing dashboard:
+    DAU, engagement minutes, exercise completions, top-of-funnel sign-ups.
+    This is a customer-facing data product — partners contractually rely on
+    these numbers.
+
+source:
+  type: delta_table
+  table: silver.engagement_events
+  read_mode: streaming           # Spark Structured Streaming on Delta CDF
+  cdf_enabled: true
+
+schema:
+  - { name: partner_id,            type: string,    nullable: false, pk: true }
+  - { name: metric_date,           type: date,      nullable: false, pk: true }
+  - { name: dau,                   type: long,      nullable: false }
+  - { name: total_sessions,        type: long,      nullable: false }
+  - { name: total_engagement_min,  type: double,    nullable: false }
+  - { name: exercise_completions,  type: long,      nullable: false }
+  - { name: new_signups,           type: long,      nullable: false }
+  - { name: top_event_types,       type: array<string>, nullable: true }
+  - { name: last_refreshed_at,     type: timestamp, nullable: false, system_assigned: true }
+
+storage:
+  bronze: { enabled: false }     # no bronze; this is a derived product
+  silver: { enabled: false }     # no silver; this IS a gold-tier product
+  gold:
+    format: delta
+    path: s3://lore-lakehouse/gold/partner_dashboard
+    partition_by: [metric_date]
+    z_order_by: [partner_id]
+    retention_days: 2555         # 7 years — contractual reporting requirement
+    serving_mirror:
+      type: clickhouse
+      table: dashboards.partner_daily
+      sync_mode: continuous
+      reason: "Sub-second p95 for the dashboard UI; Delta is for replay/audit."
+
+transformations:
+  - name: aggregate_daily_per_partner
+    type: sql
+    sql: |
+      SELECT
+        partner_id,
+        DATE(event_timestamp)                                        AS metric_date,
+        COUNT(DISTINCT user_id)                                      AS dau,
+        COUNT(DISTINCT session_id)                                   AS total_sessions,
+        SUM(CASE WHEN event_type = 'session_end'
+                 THEN CAST(event_properties['duration_seconds'] AS DOUBLE) / 60.0
+                 ELSE 0 END)                                         AS total_engagement_min,
+        SUM(CASE WHEN event_type = 'exercise_complete' THEN 1 ELSE 0 END) AS exercise_completions,
+        COUNT(DISTINCT CASE WHEN event_properties['is_first_session'] = 'true'
+                            THEN user_id END)                        AS new_signups,
+        SLICE(SORT_ARRAY(COLLECT_SET(event_type)), 1, 5)             AS top_event_types,
+        CURRENT_TIMESTAMP()                                          AS last_refreshed_at
+      FROM silver.engagement_events
+      GROUP BY partner_id, DATE(event_timestamp)
+
+  - name: merge_into_gold
+    type: merge
+    target: gold.partner_dashboard
+    match_on: [partner_id, metric_date]
+    when_matched: update_all
+    when_not_matched: insert_all
+
+quality:
+  freshness_sla_minutes: 5
+  completeness:
+    - column: partner_id
+      check: in_reference_table
+      ref: silver.partners
+      threshold: 1.0
+  business_rules:
+    - name: dau_cannot_exceed_total_sessions
+      sql: "SELECT COUNT(*) FROM gold.partner_dashboard WHERE dau > total_sessions"
+      expected: 0
+      on_failure: alert_squad
+    - name: engagement_minutes_reasonable
+      sql: "SELECT COUNT(*) FROM gold.partner_dashboard WHERE total_engagement_min > dau * 24 * 60"
+      expected: 0
+      on_failure: alert_squad
+  on_failure: block_gold_write
+
+discovery:
+  catalog: unity_catalog
+  tags: [partner-facing, revenue-critical, dashboards]
+  pii_classification: green       # aggregated, no row-level PII
+  sla_tier: tier_0                # this is customer-facing; tightest SLAs
+
+access:
+  read_groups: [partners-portal-api, analytics, customer-success]
+  write_groups: [dp-platform]

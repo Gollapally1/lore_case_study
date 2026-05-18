@@ -1,0 +1,123 @@
+# Data Contract: engagement_events
+# This is the foundational data product. The other two derive from it.
+# Edit this file to evolve the contract; the pipeline framework reads it at runtime.
+
+contract:
+  name: engagement_events
+  version: 1.2.0
+  owner_squad: engagement-platform
+  owner_email: engagement-eng@lore.co
+  description: >
+    Atomic, immutable record of every user interaction with the Lore app:
+    chat messages, session starts/ends, exercise completions, community posts,
+    rewards earned. Source of truth for all downstream engagement analytics.
+
+# ---------------------------------------------------------------------------
+# Source: where the data comes from
+# ---------------------------------------------------------------------------
+source:
+  type: kafka
+  topic: app.engagement.v1
+  format: avro
+  schema_registry_subject: app.engagement.v1-value
+  consumer_group: dp-engagement-events
+  start_from: earliest          # for replay; production uses committed offsets
+
+# ---------------------------------------------------------------------------
+# Schema: enforced at write time
+# ---------------------------------------------------------------------------
+schema:
+  - { name: event_id,        type: string,    nullable: false, pii: false, description: "UUID v7 from client; idempotency key" }
+  - { name: event_timestamp, type: timestamp, nullable: false, pii: false }
+  - { name: ingest_timestamp,type: timestamp, nullable: false, pii: false, system_assigned: true }
+  - { name: user_id,         type: string,    nullable: false, pii: true,  pii_class: pseudonymous_id }
+  - { name: partner_id,      type: string,    nullable: false, pii: false, description: "Employer / sponsoring partner" }
+  - { name: event_type,      type: string,    nullable: false, pii: false, allowed_values: [chat_message, session_start, session_end, exercise_complete, community_post, reward_earned] }
+  - { name: session_id,      type: string,    nullable: true,  pii: false }
+  - { name: event_properties, type: "map<string,string>", nullable: true, pii: false, description: "Event-specific bag; do not put PII here" }
+  - { name: app_version,     type: string,    nullable: false, pii: false }
+  - { name: device_platform, type: string,    nullable: false, pii: false, allowed_values: [ios, android, web] }
+
+# ---------------------------------------------------------------------------
+# Storage: where it lands
+# ---------------------------------------------------------------------------
+storage:
+  bronze:
+    format: delta
+    path: s3://lore-lakehouse/bronze/engagement_events
+    partition_by: [ingest_date]
+    retention_days: 30           # raw, cheap
+  silver:
+    format: delta
+    path: s3://lore-lakehouse/silver/engagement_events
+    partition_by: [event_date, partner_id]
+    z_order_by: [user_id, event_type]
+    retention_days: 730          # 2 years
+    clustering: liquid           # Delta liquid clustering on user_id
+  gold:
+    # No gold table — engagement_events IS the silver product.
+    # Aggregates live in partner_dashboard and user_journey contracts.
+    enabled: false
+
+# ---------------------------------------------------------------------------
+# Transformations: bronze -> silver
+# ---------------------------------------------------------------------------
+transformations:
+  - name: dedup_on_event_id
+    type: deduplicate
+    keys: [event_id]
+    keep:
+      latest_by: ingest_timestamp
+    rationale: "Clients retry on network failure; event_id is the idempotency key."
+
+  - name: late_event_handling
+    type: filter
+    expr: "event_timestamp >= current_timestamp() - INTERVAL 7 DAYS"
+    on_violation: route_to_quarantine
+
+  - name: pseudonymize_user_id
+    type: hash
+    column: user_id
+    algorithm: sha256
+    salt_secret: lakehouse/secrets/user_id_salt
+    rationale: "Silver is the analytics-safe boundary. Raw user_id stays in the PII vault."
+
+# ---------------------------------------------------------------------------
+# Quality: gates before silver is queryable
+# ---------------------------------------------------------------------------
+quality:
+  freshness_sla_minutes: 2
+  completeness:
+    - column: event_id
+      check: not_null
+      threshold: 1.0
+    - column: user_id
+      check: not_null
+      threshold: 0.999       # allow 0.1% anonymous events (pre-login)
+    - column: partner_id
+      check: in_reference_table
+      ref: silver.partners
+      threshold: 0.9995
+  uniqueness:
+    - columns: [event_id]
+      threshold: 1.0
+  volume:
+    expected_events_per_minute: 8000
+    alert_if_below_pct: 50    # page on-call if traffic drops by half
+  on_failure: block_silver_write
+
+# ---------------------------------------------------------------------------
+# Lineage and discovery
+# ---------------------------------------------------------------------------
+discovery:
+  catalog: unity_catalog
+  tags: [engagement, mental-health-app, foundational]
+  pii_classification: amber     # contains pseudonymous IDs
+  sla_tier: tier_1               # page on-call within 5 min
+
+# ---------------------------------------------------------------------------
+# Access
+# ---------------------------------------------------------------------------
+access:
+  read_groups: [analytics, ml-platform, engagement-squad, partner-squad, growth-squad]
+  write_groups: [dp-platform]    # only the platform pipeline writes

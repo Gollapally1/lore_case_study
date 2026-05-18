@@ -1,0 +1,126 @@
+# PROPOSED Data Contract: engagement_events v2.0.0
+#
+# This file is a worked example of a major-version cutover. It is NOT live
+# in the pipeline — the framework reads v1.2.0 (engagement_events.yaml).
+# CI runs:
+#     python src/check_schema_compat.py \
+#         --old configs/engagement_events.yaml \
+#         --new configs/engagement_events_v2_proposed.yaml
+# ...which classifies the diff and confirms the major bump is required.
+#
+# Why a v2: clinical research wants signed engagement intensity (-1..1)
+# instead of free-form properties for the small set of clinically meaningful
+# events. That is a breaking change to producers and consumers, so it gets a
+# parallel topic during the migration window per ARCHITECTURE.md.
+
+contract:
+  name: engagement_events
+  version: 2.0.0                 # MAJOR bump: breaking changes below
+  owner_squad: engagement-platform
+  owner_email: engagement-eng@lore.co
+  description: >
+    v2: Atomic engagement events, with structured clinical-intensity
+    signals for the small set of clinically meaningful event types.
+    During migration, v1.2.0 and v2.0.0 run in parallel on
+    app.engagement.v1 and app.engagement.v2 respectively.
+
+source:
+  type: kafka
+  topic: app.engagement.v2       # NEW topic — old consumers stay on v1
+  format: avro
+  schema_registry_subject: app.engagement.v2-value
+  consumer_group: dp-engagement-events-v2
+  start_from: earliest
+
+schema:
+  - { name: event_id,         type: string,    nullable: false, pii: false }
+  - { name: event_timestamp,  type: timestamp, nullable: false, pii: false }
+  - { name: ingest_timestamp, type: timestamp, nullable: false, pii: false, system_assigned: true }
+  - { name: user_id,          type: string,    nullable: false, pii: true,  pii_class: pseudonymous_id }
+  - { name: partner_id,       type: string,    nullable: false, pii: false }
+  # BREAKING: allowed_values narrowed (removed 'community_post' — moved to
+  # its own contract, app.community.v1, because community events have
+  # different retention requirements).
+  - { name: event_type, type: string, nullable: false, allowed_values: [chat_message, session_start, session_end, exercise_complete, reward_earned] }
+  - { name: session_id,       type: string,    nullable: true,  pii: false }
+  # BREAKING: previously event_properties was free-form map<string,string>;
+  # now structured. Consumers reading event_properties.intensity as a string
+  # will fail.
+  - { name: event_properties, type: "struct<duration_seconds:int,category:string,is_first_session:boolean>", nullable: true, pii: false }
+  # ADDITIVE: new optional field; existing consumers ignore it.
+  - { name: clinical_intensity, type: double,   nullable: true,  pii: false, description: "-1..1 clinical signal, populated for event_types in {chat_message, exercise_complete}" }
+  - { name: app_version,      type: string,    nullable: false, pii: false }
+  - { name: device_platform,  type: string,    nullable: false, pii: false, allowed_values: [ios, android, web] }
+
+storage:
+  bronze:
+    format: delta
+    path: s3://lore-lakehouse/bronze/engagement_events_v2
+    partition_by: [ingest_date]
+    retention_days: 30
+  silver:
+    format: delta
+    path: s3://lore-lakehouse/silver/engagement_events_v2
+    partition_by: [event_date, partner_id]
+    z_order_by: [user_id, event_type]
+    retention_days: 730
+    clustering: liquid
+  gold:
+    enabled: false
+
+transformations:
+  - name: dedup_on_event_id
+    type: deduplicate
+    keys: [event_id]
+    keep:
+      latest_by: ingest_timestamp
+
+  - name: late_event_handling
+    type: filter
+    expr: "event_timestamp >= current_timestamp() - INTERVAL 7 DAYS"
+    on_violation: route_to_quarantine
+
+  - name: pseudonymize_user_id
+    type: hash
+    column: user_id
+    algorithm: sha256
+    salt_secret: lakehouse/secrets/user_id_salt
+
+quality:
+  freshness_sla_minutes: 2
+  completeness:
+    - column: event_id
+      check: not_null
+      threshold: 1.0
+    - column: user_id
+      check: not_null
+      threshold: 0.999
+  uniqueness:
+    - columns: [event_id]
+      threshold: 1.0
+  business_rules:
+    - name: clinical_intensity_in_range
+      sql: "SELECT COUNT(*) FROM silver.engagement_events_v2 WHERE clinical_intensity IS NOT NULL AND (clinical_intensity < -1 OR clinical_intensity > 1)"
+      expected: 0
+      on_failure: alert_squad
+  on_failure: block_silver_write
+
+discovery:
+  catalog: unity_catalog
+  tags: [engagement, mental-health-app, foundational, v2-clinical-signals]
+  pii_classification: amber
+  sla_tier: tier_1
+
+access:
+  read_groups: [analytics, ml-platform, engagement-squad, partner-squad, growth-squad, clinical-research]
+  write_groups: [dp-platform]
+
+# Migration window: producers double-write v1 + v2 for 6 weeks; consumers
+# migrate at their own pace; v1 deprecated at end of window per the
+# breaking-change policy in ARCHITECTURE.md.
+migration:
+  parallel_window_start: "2026-06-01"
+  parallel_window_end:   "2026-07-15"
+  v1_topic: app.engagement.v1
+  v2_topic: app.engagement.v2
+  deprecation_owner: engagement-platform

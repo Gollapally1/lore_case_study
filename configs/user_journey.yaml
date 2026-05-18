@@ -1,0 +1,100 @@
+# Data Contract: user_journey
+# Derived data product. Sessionizes events into per-user journey records
+# for cohort analysis, retention, and clinical outcome research.
+
+contract:
+  name: user_journey
+  version: 0.9.0       # pre-GA; still iterating with clinical team
+  owner_squad: growth-clinical
+  owner_email: clinical-data@lore.co
+  description: >
+    Per-user, per-day journey record. One row per (pseudonymized_user_id, day)
+    with a structured array of events, derived stage in the resilience-building
+    journey, and cohort tags. Supports retention curves, drop-off analysis,
+    and clinical outcome cohorts.
+
+source:
+  type: delta_table
+  table: silver.engagement_events
+  read_mode: batch                 # nightly batch; not customer-facing
+  schedule_cron: "0 2 * * *"       # 2 AM PT
+  schedule_owner: airflow
+
+schema:
+  - { name: pseudonymized_user_id, type: string,    nullable: false, pk: true }
+  - { name: partner_id,            type: string,    nullable: false }
+  - { name: journey_date,          type: date,      nullable: false, pk: true }
+  - { name: days_since_signup,     type: int,       nullable: false }
+  - { name: events,                type: "array<struct<event_type:string,ts:timestamp,session_id:string>>", nullable: false }
+  - { name: session_count,         type: int,       nullable: false }
+  - { name: total_engagement_min,  type: double,    nullable: false }
+  - { name: derived_stage,         type: string,    nullable: false, allowed_values: [onboarding, exploring, engaged, habitual, lapsing, churned] }
+  - { name: cohort_tags,           type: array<string>, nullable: true }
+  - { name: last_refreshed_at,     type: timestamp, nullable: false, system_assigned: true }
+
+storage:
+  bronze: { enabled: false }
+  silver: { enabled: false }
+  gold:
+    format: delta
+    path: s3://lore-lakehouse/gold/user_journey
+    partition_by: [journey_date]
+    z_order_by: [pseudonymized_user_id, partner_id]
+    retention_days: 1825           # 5 years for clinical research
+    serving_mirror:
+      type: none                   # batch analytics only; queried directly via Spark/Trino
+
+transformations:
+  - name: sessionize
+    type: pyspark_function
+    function: src.transforms.user_journey.sessionize_user_day
+    rationale: "Sessionization logic is non-trivial (30-min inactivity window). Stays in code, not SQL."
+
+  - name: derive_stage
+    type: pyspark_function
+    function: src.transforms.user_journey.derive_resilience_stage
+    rationale: "Clinical team owns this rule; isolating it in a function keeps the contract stable as the rule evolves."
+
+  - name: tag_cohorts
+    type: sql
+    sql: |
+      -- Apply cohort tags based on partner config + behavioral signals
+      ARRAY_DISTINCT(ARRAY(
+        CASE WHEN days_since_signup <= 7 THEN 'new_user' END,
+        CASE WHEN session_count >= 5 THEN 'high_engagement' END,
+        CASE WHEN derived_stage = 'lapsing' THEN 'retention_risk' END
+      ))
+
+  - name: merge_into_gold
+    type: merge
+    target: gold.user_journey
+    match_on: [pseudonymized_user_id, journey_date]
+    when_matched: update_all
+    when_not_matched: insert_all
+
+quality:
+  freshness_sla_minutes: 15        # batch tolerates more latency
+  completeness:
+    - column: pseudonymized_user_id
+      check: not_null
+      threshold: 1.0
+  business_rules:
+    - name: stage_must_be_valid
+      sql: "SELECT COUNT(*) FROM gold.user_journey WHERE derived_stage NOT IN ('onboarding','exploring','engaged','habitual','lapsing','churned')"
+      expected: 0
+    - name: session_count_matches_events
+      sql: "SELECT COUNT(*) FROM gold.user_journey WHERE session_count != SIZE(ARRAY_DISTINCT(TRANSFORM(events, e -> e.session_id)))"
+      expected: 0
+      on_failure: alert_squad
+  on_failure: block_gold_write
+
+discovery:
+  catalog: unity_catalog
+  tags: [analytics, clinical-research, retention, cohort]
+  pii_classification: amber        # pseudonymized but re-identification risk in aggregate
+  sla_tier: tier_2
+
+access:
+  read_groups: [growth-squad, clinical-research, analytics]
+  write_groups: [dp-platform]
+  audit: all_reads_logged          # clinical-research-grade audit trail
