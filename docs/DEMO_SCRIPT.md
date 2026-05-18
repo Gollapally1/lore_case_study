@@ -1,84 +1,110 @@
-# Demo recording — shot list & narration
+# Demo recording — script, prep, and interview-fallback plan
 
-A 3–4 minute Loom walkthrough that an interviewer can watch before the panel. The goal is to land three beats: **the contract is the API**, **the framework is real (not a slide)**, and **the customer-facing data product is end-to-end.**
+A 3–4 minute walkthrough you can:
+1. **Send pre-panel** as a Loom link (so interviewers can pre-read the artifact at their own pace).
+2. **Play during the panel** if the live demo hits an unforeseen issue (laptop hibernation, network flake, Spark JVM tantrum). This is the real reason to record — risk insurance.
 
-Tools: [Loom](https://www.loom.com) (free; produces a shareable URL) or QuickTime (Cmd+Shift+5 on macOS for screen + camera).
-
----
-
-## Pre-recording checklist
-
-- [ ] Terminal at a comfortable font size (16–18pt). Dark theme is fine.
-- [ ] Browser tab on http://localhost:8501 closed (you'll open it on camera).
-- [ ] Repo open in VSCode in a second window — useful for show-the-code moments.
-- [ ] Run `bash demo.sh` once beforehand so the warm-up isn't recorded; then `rm -rf data/lakehouse/ data/raw/` so the recording shows a real cold run.
-- [ ] Have these files open in tabs: [configs/engagement_events.yaml](../configs/engagement_events.yaml), [src/run_pipeline.py](../src/run_pipeline.py), [src/dashboard.py](../src/dashboard.py).
+The script is timed for 3:30 with comfortable pacing. Hit RECORD only after running the prep script and reading the checklist.
 
 ---
 
-## Beat 1 — The thesis (≤ 30s, no terminal yet)
+## Step 0 — Tools
 
-> "The brief frames this as a tooling problem — too many systems, too much cognitive load. I read it as a contract problem. Every team ships its own pipeline because there's no shared definition of what 'a user engagement event' is. My response: collapse to one ingestion path, one storage layer, one transformation framework — driven by versioned YAML data contracts that any squad can author without touching pipeline code."
+**Recommended: macOS built-in screen recording (Cmd-Shift-5) + Loom upload.**
 
-Show the [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) Mermaid diagram on screen during this. (Open in GitHub or in the rendered case_study.html — both render Mermaid cleanly.)
+- Cmd-Shift-5 → "Record Selected Portion" → drag a region → click Record → narrate → Esc to stop → save as `.mov`.
+- The `.mov` is your **interview-fallback** asset. Save it somewhere you can find fast (`~/Desktop/lore_demo.mov`).
+- Then upload the `.mov` to Loom (drag-and-drop into loom.com) and get a public share URL for the email.
+
+Why not just Loom? Loom is cloud-hosted; if the venue Wi-Fi is bad during the panel, the fallback recording loads slowly. Keeping a local `.mov` you can drop into QuickTime / VLC works offline.
+
+Alternatives:
+- **Loom desktop app** — easiest end-to-end, but cloud-only.
+- **OBS Studio** — best quality, steepest learning curve. Overkill here.
+- **QuickTime → File → New Screen Recording** — equivalent to Cmd-Shift-5, slightly older UI.
 
 ---
 
-## Beat 2 — The contract is the API (≤ 45s)
+## Step 1 — Pre-record checklist
 
-Open [configs/engagement_events.yaml](../configs/engagement_events.yaml). Scroll through.
+Run this before every take:
 
-> "This is one of three live contracts. Schema with allowed_values and nullability, transformations (dedup, late-event filter with quarantine routing, pseudonymization), quality gates, PII classification, access groups. The runtime in src/run_pipeline.py reads this file and executes Bronze → Silver → Gold. The squad doesn't write pipeline code; they write this YAML."
+```bash
+bash scripts/prep_demo.sh
+```
 
-Point at: `transformations:` block, `quality.on_failure: block_silver_write`, `access.read_groups`.
+It cleans generated data, warms the JVM with a throwaway pipeline run (so the recorded run doesn't pay the cold-start tax), and confirms the dashboard's deps import. Takes ~30 seconds.
+
+Then, manually:
+
+- [ ] Terminal font 18pt (Cmd-+ a few times). Dark theme is fine; the screencap reads either way.
+- [ ] Terminal window ~120 cols × 36 rows. Big enough to read, small enough to fit the recording region.
+- [ ] **Clear the scrollback (Cmd-K)** so the recording starts on a blank prompt.
+- [ ] Close every other window. Slack, Notes, Mail — close them. Notifications are recording poison; turn on Do Not Disturb (Cmd-Option-D).
+- [ ] Second window open with `https://github.com/Gollapally1/lore_case_study` for Beat 1 (architecture diagram).
+- [ ] Camera on if using Loom — a face in the corner reads as more trustworthy than a faceless screencast. Microphone level checked (one quick test recording first).
 
 ---
 
-## Beat 3 — The runtime is real (≤ 90s)
+## Step 2 — The script (≈ 3:30 total)
 
-Run:
+### Beat 1 — Thesis (0:00 – 0:25, ~25s)
+
+**Stay on the GitHub README page or the architecture diagram — no terminal yet.**
+
+> "Hey, I'm Naveen. This is a 3-minute walkthrough of my Lore case-study response.
+>
+> The brief frames this as a tooling problem — too many systems, too much cognitive load. I read it as a **contract problem**. Every team ships its own pipeline because there's no shared definition of what 'a user engagement event' is. My response is to collapse to one ingestion path, one storage layer, one transformation framework — driven by versioned YAML data contracts that any squad can author without touching pipeline code.
+>
+> Here's the future-state architecture."
+
+*(scroll briefly through the Mermaid diagram on GitHub)*
+
+### Beat 2 — The contract is the API (0:25 – 1:05, ~40s)
+
+**Switch to the editor; open [configs/engagement_events.yaml](../configs/engagement_events.yaml).**
+
+> "This is one of three live contracts. Schema with `allowed_values` and nullability, transformations — dedup, late-event filter with quarantine routing, pseudonymization — quality gates, PII classification, access groups.
+>
+> The runtime in `src/run_pipeline.py` reads this file and executes Bronze → Silver → Gold. The squad doesn't write pipeline code; they write this YAML.
+>
+> Let's run it."
+
+### Beat 3 — Live pipeline run (1:05 – 2:00, ~55s)
+
+**Switch to the terminal at a clean prompt.**
 
 ```bash
 bash demo.sh
 ```
 
-While it runs (~30 seconds), narrate live:
+While it scrolls (~25-30s after the warm-up), narrate:
 
-> "Step 1 generates 24K synthetic events with intentional dirt baked in: duplicates, late arrivals, invalid partner_ids. Step 2 runs the engagement_events contract — watch the per-step output: 500 duplicates removed by event_id, 50 late events routed to a quarantine table, user_ids pseudonymized via salted sha256. The schema is enforced; quality checks pass; silver is written. Step 3 runs partner_dashboard which reads silver and writes the partner-facing gold table. Step 4 queries the rollup."
+> "Step 1 generates ~24,000 synthetic events with intentional dirt baked in: duplicates, late arrivals, invalid partner_ids. *(beat)* Step 2 runs the engagement_events contract — watch the per-step output. *(beat)* 500 duplicates removed by event_id, 50 late events routed to a quarantine table, user_ids pseudonymized via salted sha256. Schema enforced; quality checks pass; silver is written. *(beat)* Step 3 runs partner_dashboard — reads silver, writes the partner-facing gold table."
 
-When step 4 prints the per-partner rollup, **pause briefly on it**:
+When step 4 prints the per-partner rollup, **pause on it visibly**:
 
-> "This is the money shot. Per-partner, per-day: DAU, sessions, engagement minutes, exercise completions. This is what the partner contractually sees in their dashboard."
+> "And this is the money shot. Per-partner, per-day: DAU, sessions, engagement minutes, exercise completions. This is exactly what partners contractually see in their dashboard."
 
----
-
-## Beat 4 — The customer view (≤ 45s)
+### Beat 4 — Customer-facing dashboard (2:00 – 2:35, ~35s)
 
 ```bash
 streamlit run src/dashboard.py
 ```
 
-Wait for the browser to open. Then:
+Wait for the browser to open (or switch to a pre-opened tab to save time). Then:
 
-> "Same Gold table, same numbers, partner-facing. Filter by partner — Acme Corp only. KPI tiles. DAU trend per partner. The Gold table is the contract; the dashboard is one consumer. In production this is ClickHouse-backed for sub-second p95 — locally it's pandas reading the same Parquet."
+> "Same Gold table, partner-facing. *(filter to one partner; numbers change)* Filter by partner — Acme Corp only — and the KPIs recompute. DAU trend per partner over the last 7 days. *(scroll to bottom)* And the same rollup table, sortable. In production this is ClickHouse-backed for sub-second p95 — locally it's pandas reading the same Parquet, which is good enough for the demo."
 
-Click the partner multiselect, change the date range, scroll to the raw rollup at the bottom.
+### Beat 5 — Platform proof points (2:35 – 3:20, ~45s)
 
----
-
-## Beat 5 — The platform proof points (≤ 60s)
-
-Back in the terminal, **show three artifacts** without spending more than ~15s on each:
-
-**(a) Lineage sidecar** — every run emits a JSON record:
+**Switch back to the terminal.** Three quick artifacts, ~12 seconds each:
 
 ```bash
 cat data/lakehouse/_lineage/engagement_events/run_*.json | head -40
 ```
 
-> "Contract version, source, transformations, row counts, duration. This is what feeds Unity Catalog in production — and it's the 30-min-to-root-cause guarantee from REQUIREMENTS.md."
-
-**(b) Schema compatibility check** — for the PR that proposes v2:
+> "Lineage sidecar per run. Contract version, source, transformations, row counts, duration. In production this feeds Unity Catalog — locally it's the answer to 'where did this number come from'."
 
 ```bash
 python src/check_schema_compat.py \
@@ -86,29 +112,52 @@ python src/check_schema_compat.py \
   --new configs/engagement_events_v2_proposed.yaml
 ```
 
-> "CI runs this on every contract PR. It classifies the diff and enforces the version bump policy. Breaking change without a major bump fails the build."
-
-**(c) Right-to-deletion** — HIPAA-aligned posture:
+> "Schema compatibility check — CI runs this on every contract PR. Classifies the diff, enforces the version bump policy. A breaking change without a major bump fails the build."
 
 ```bash
 python src/delete_user.py --user-id user_00001 --dry-run
 ```
 
-> "Mental-health data; PII gravity is real. This script computes the silver-side pseudonym, cascades the delete across silver and gold, and writes an immutable tombstone for audit. Tested in CI."
+> "And right-to-deletion. Mental-health data; PII gravity matters. Computes the silver-side pseudonym, cascades the delete across silver and gold, writes an immutable audit tombstone. Tested in CI."
+
+### Beat 6 — Close (3:20 – 3:35, ~15s)
+
+> "Three data products from three YAML files, one runtime. Schema enforcement, quality gates, lineage, quarantine, right-to-deletion — all driven by the contracts, not by hand-written pipeline code. Full repo and PDF write-up are linked in the email. Thanks for watching."
+
+**Stop recording.** Save as `~/Desktop/lore_demo.mov`.
 
 ---
 
-## Beat 6 — Close (≤ 20s)
+## Step 3 — After the recording
 
-> "Three data products from three YAML files. One runtime. Schema enforcement, quality gates, lineage, quarantine, right-to-deletion — all driven by the contracts, not by hand-written pipeline code. The full case study is at the GitHub link below; happy to deep-dive on any of this in the interview."
-
-Stop recording. Loom will give you a shareable URL.
+1. Trim the dead air at the start and end (Cmd-Shift-T in QuickTime Player to start, or in Loom's editor).
+2. Watch the take once muted, then once with audio. If it's not clean, retake — recording takes ~5 minutes; awkward audio is forever.
+3. **Save the local `.mov`** to a place you'll find fast (`~/Desktop/lore_demo.mov` or pinned in Finder).
+4. **Upload to Loom** (drag the `.mov` to loom.com) for the email link. Set sharing to "anyone with the link".
+5. Paste the Loom URL into `scripts/build_case_study.py` (`LINKS["Demo recording"]`), then rerun `python scripts/build_case_study.py && python scripts/build_pdf.py` so the PDF artifact carries the working link.
 
 ---
 
-## After the recording
+## Step 4 — Interview-day fallback plan
 
-- Trim the dead air at the start and end.
-- Verify Loom shows your face in the bottom corner — interviewers respond better to a face than to a pure screencast.
-- Paste the Loom URL into [scripts/build_case_study.py](../scripts/build_case_study.py) under `LINKS["Demo recording"]`, then re-run the build so the HTML/PDF artifact links to it.
-- Also paste into the [Email template](EMAIL_TEMPLATE.md) before sending.
+If the live demo fails (laptop hibernation, network issue, Spark JVM hang, Streamlit port conflict), say something like:
+
+> "Looks like X is misbehaving — let me skip the live run and play the recorded version so we don't burn panel time on the toolchain. I can answer questions on the underlying code as it plays."
+
+Then:
+1. Open `~/Desktop/lore_demo.mov` in QuickTime Player.
+2. Cmd-F to fullscreen.
+3. Pause whenever an interviewer interrupts with a question.
+
+**Key reframe:** the video failing-over to fallback is itself a signal — it shows you anticipated failure modes and prepared for them. Don't apologize too much; ship the demo and move on.
+
+---
+
+## Step 5 — If you don't record
+
+The case-study brief doesn't require a recording. The repo + PDF + live demo at the panel is a complete artifact set. Skip Steps 1–4 and:
+
+- Run `bash scripts/prep_demo.sh` immediately before the panel so the warmup is already done — first live run is fast.
+- Don't paste a Loom link into the email; replace that line with: *"Happy to walk through the demo live in the panel."*
+
+Pick the path that minimizes anxiety for *you*. Both are credible.
