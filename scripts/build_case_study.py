@@ -36,7 +36,6 @@ SECTIONS = [
 # building the final version you ship.
 LINKS = {
     "GitHub repo":      "https://github.com/Gollapally1/lore_case_study",
-    "Demo recording":   "https://www.loom.com/share/<paste-loom-id-after-recording>",
     "Live dashboard":   "http://localhost:8501 (after `streamlit run src/dashboard.py`)",
 }
 

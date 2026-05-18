@@ -101,10 +101,10 @@ open case_study.html                   # then File > Print > Save as PDF in Chro
 
 The HTML renders Mermaid and syntax highlighting via CDN; the same file prints cleanly to PDF in any modern browser — no pandoc / wkhtmltopdf toolchain needed.
 
-**Demo recording.** The recommended walkthrough script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md): run `bash demo.sh`, open the Streamlit dashboard, narrate the rollup and the lineage sidecar. 3–4 minutes via [Loom](https://www.loom.com) is plenty.
+**Live demo.** `bash demo.sh` reproduces the full pipeline end-to-end in ~30 seconds (~24K synthetic events → Bronze → Silver → Gold → partner rollup query). `streamlit run src/dashboard.py` then serves the partner-facing dashboard on http://localhost:8501.
 
 **Repo layout:**
-- [docs/](docs/) — architecture, requirements (with cost Fermi), migration plan, HOWTO, talking points, demo script
+- [docs/](docs/) — architecture, requirements (with cost Fermi), migration plan, HOWTO, engineering trade-offs
 - [configs/](configs/) — data contracts (YAML); see also `engagement_events_v2_proposed.yaml` for the worked schema-versioning example
 - [src/](src/) — runnable PySpark prototype: [run_pipeline.py](src/run_pipeline.py), [dashboard.py](src/dashboard.py), [check_schema_compat.py](src/check_schema_compat.py), [delete_user.py](src/delete_user.py), [query_results.py](src/query_results.py)
 - [tests/](tests/) — 16 pytest tests (dedup, pseudonymization, schema enforcement, business invariants)
