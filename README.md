@@ -76,15 +76,15 @@ All three are derived from the same Silver layer, which guarantees a partner das
 
 ---
 
-## What this case study is really testing (my read)
+## How the response is organized
 
-The three interviews each see a different facet. My response is structured to land in all three:
+The case-study brief spans three concerns that are usually treated separately. The response addresses each substantively, not as a slide:
 
-1. **Strategic / leadership lens** — phased migration, requirements as SLAs, organizational structure (who owns what).
-2. **Technical depth lens** — actual code, choice of streaming engine, contract schema, idempotency and exactly-once.
-3. **Collaboration / cross-functional lens** — how a non-DE squad ships a new dashboard without filing a ticket with my team.
+1. **Strategy** — phased migration, SLAs as the requirements artifact, where the org draws ownership lines. See [docs/MIGRATION_PLAN.md](docs/MIGRATION_PLAN.md) and [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+2. **Engineering** — runnable code (contracts, runtime, tests, dashboard), explicit trade-offs (streaming engine, table format, exactly-once semantics, schema evolution, quarantine handling). See [src/](src/), [configs/](configs/), and [docs/TALKING_POINTS.md](docs/TALKING_POINTS.md) for the trade-off rationale.
+3. **Collaboration** — how a non-DE squad ships a new data product without filing a ticket with the platform team. See [docs/HOWTO_NEW_DATA_PRODUCT.md](docs/HOWTO_NEW_DATA_PRODUCT.md).
 
-See [docs/TALKING_POINTS.md](docs/TALKING_POINTS.md) for what to emphasize when.
+[docs/TALKING_POINTS.md](docs/TALKING_POINTS.md) (renamed *Engineering Trade-offs & Operating Principles*) is the longest single doc — it captures the *why* behind each decision in the rest of the repo.
 
 ---
 

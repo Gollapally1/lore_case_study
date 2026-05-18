@@ -29,7 +29,7 @@ SECTIONS = [
     ("Requirements & Cost",         DOCS / "REQUIREMENTS.md"),
     ("Migration Plan",              DOCS / "MIGRATION_PLAN.md"),
     ("Adding a New Data Product",   DOCS / "HOWTO_NEW_DATA_PRODUCT.md"),
-    ("Interview Talking Points",    DOCS / "TALKING_POINTS.md"),
+    ("Engineering Trade-offs & Operating Principles", DOCS / "TALKING_POINTS.md"),
 ]
 
 # Optional: links displayed at the top of the artifact. Edit these before
