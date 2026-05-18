@@ -52,6 +52,18 @@ pytest tests/
 
 ---
 
+## Screenshots
+
+**Partner-facing Streamlit dashboard, reading directly from `gold.partner_dashboard`:**
+
+![Partner Dashboard](docs/images/dashboard_overview.png)
+
+**Per-partner daily rollup — the contractual numbers Lore reports to employer partners:**
+
+![Per-partner daily rollup](docs/images/rollup_table.png)
+
+---
+
 ## The three data products
 
 | Product | Owner squad | Latency SLA | Consumer |
