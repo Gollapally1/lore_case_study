@@ -35,8 +35,8 @@ SECTIONS = [
 # Optional: links displayed at the top of the artifact. Edit these before
 # building the final version you ship.
 LINKS = {
-    "GitHub repo":      "https://github.com/<your-username>/lore_case_study",
-    "Demo recording":   "https://www.loom.com/share/<your-loom-id>",
+    "GitHub repo":      "https://github.com/Gollapally1/lore_case_study",
+    "Demo recording":   "https://www.loom.com/share/<paste-loom-id-after-recording>",
     "Live dashboard":   "http://localhost:8501 (after `streamlit run src/dashboard.py`)",
 }
 
@@ -72,12 +72,14 @@ def md_to_html(md: str) -> str:
             while i < len(lines) and not re.match(r"^```\s*$", lines[i]):
                 body.append(lines[i])
                 i += 1
-            code = html.escape("\n".join(body))
+            raw = "\n".join(body)
             cls = f"language-{lang}"
             if lang == "mermaid":
-                out.append(f'<div class="mermaid">{code}</div>')
+                # Mermaid parses its own syntax — NEVER HTML-escape it,
+                # or quote characters / <br/> tags inside node labels break.
+                out.append(f'<div class="mermaid">{raw}</div>')
             else:
-                out.append(f'<pre><code class="{cls}">{code}</code></pre>')
+                out.append(f'<pre><code class="{cls}">{html.escape(raw)}</code></pre>')
             i += 1
             continue
 
@@ -155,6 +157,13 @@ def _inline(text: str) -> str:
     text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
     # Italic
     text = re.sub(r"\b_([^_]+)_\b", r"<em>\1</em>", text)
+    # Images ![alt](src) — must come BEFORE the link rule, since both share
+    # the same trailing [text](url) shape.
+    text = re.sub(
+        r"!\[([^\]]*)\]\(([^)]+)\)",
+        lambda m: f'<img src="{html.escape(m.group(2))}" alt="{html.escape(m.group(1))}">',
+        text,
+    )
     # Links [text](url)
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)",
                   lambda m: f'<a href="{html.escape(m.group(2))}">{m.group(1)}</a>',
@@ -284,6 +293,7 @@ HEAD = """<!doctype html>
     margin: 1rem 0;
     text-align: center;
   }
+  .mermaid svg { max-width: 100%; height: auto; }
   .pdf-hint {
     background: #fffbeb;
     border: 1px solid #fcd34d;
@@ -298,7 +308,11 @@ HEAD = """<!doctype html>
     section.doc { page-break-before: always; }
     section.doc:first-of-type { page-break-before: auto; }
     h1, h2, h3 { page-break-after: avoid; }
-    pre, table, .mermaid, figure { page-break-inside: avoid; }
+    pre, table, figure { page-break-inside: avoid; }
+    /* .mermaid intentionally NOT page-break-inside: avoid — large diagrams
+       like our future-state architecture are taller than a printable page,
+       and `avoid` causes Chromium to push them off and clip silently. */
+    .mermaid svg { max-height: 9in; width: auto !important; max-width: 100%; }
     a { color: var(--fg); text-decoration: none; }
     a[href^="http"]::after { content: " (" attr(href) ")"; font-size: .8em; color: var(--muted); }
   }
@@ -309,7 +323,12 @@ HEAD = """<!doctype html>
 
 FOOT = """
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+<script>
+  // Use the explicit run() call instead of startOnLoad: true — the latter
+  // misses DOMContentLoaded when this script tag runs late in body parse.
+  mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+  mermaid.run().then(() => { document.body.dataset.mermaidReady = 'true'; });
+</script>
 <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
 </body>
